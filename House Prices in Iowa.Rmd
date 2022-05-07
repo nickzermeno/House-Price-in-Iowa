@@ -1,0 +1,390 @@
+---
+title: "House Prices in Iowa"
+output: github_document
+---
+Let's start by grabbing the packages we are going to use.
+
+```{r}
+library(corrr)
+library(rcompanion)
+library(tidyverse)
+library(mice)
+library(VIM)
+library(SignifReg)
+library(car)
+library(corrplot)
+library(randomForest)
+```
+
+Next, we can read the data we will be using.
+
+```{r}
+train <- read.csv('train.csv', header=TRUE)
+test <- read.csv('test.csv', header=TRUE)
+sample_submission <- read.csv("sample_submission.csv", header = TRUE)
+```
+
+So we have our data now, what is the first thing we should do? We need it inspect it and get a general idea of what's going on
+
+```{r}
+train
+```
+
+```{r}
+test
+```
+
+It looks like we are missing quite a bit of data, let's see exactly how much of it is missing starting with the training set.
+
+```{r}
+pMiss <- function(x){sum(is.na(x))/length(x)*100}
+apply(train,2,pMiss)
+```
+
+We can start imputing some of this data with the MICE function
+
+```{r}
+mice_train <- mice(train, m=5, maxit=50, method = "pmm", seed = 500)
+mice_train_full <- complete(mice_train, 1)
+```
+
+So we imputed the missing values using the predictive mean matching method from MICE on 3 columns: LotFrontage, MasVnrArea, and GarageYrBlt. Now we should deal with the rest of the NA's by converting them to 0's since that will be easier to work with. We can quickly see if the rest are marked as being criteria in the data description quickly by creating a function to check for NA in each column.
+
+```{r}
+na_count_train_test <-sapply(mice_train_full, function(y) sum(length(which(is.na(y)))))
+na_count_train_test <- data.frame(na_count_train_test)
+na_count_train_test
+```
+
+Two categories stick out that don't use NA as a criteria, MasVnrType and Electrical. We can start with MasVnrType and use mode imputation since there is only 8 missing values.
+
+```{r}
+MasVnrType_val <- unique(mice_train_full$MasVnrType[!is.na(mice_train_full$MasVnrType)]) 
+MasVnrType_mode <- MasVnrType_val[which.max(tabulate(match(mice_train_full$MasVnrType, MasVnrType_val)))]
+MasVnrType_imp <- mice_train_full$MasVnrType
+MasVnrType_imp[is.na(MasVnrType_imp)] <- MasVnrType_mode    
+mice_train_full$MasVnrType <- MasVnrType_imp
+```
+
+We will do the same thing for Electrical, mode imputation, since it is only 1 variable missing.
+
+```{r}
+table(mice_train_full$Electrical)
+mice_train_full$Electrical[is.na(mice_train_full$Electrical)] <- "SBrkr"
+```
+
+The rest have NA as a level so we will just swap those with O's now.
+
+```{r}
+mice_train_full$BsmtQual[is.na(mice_train_full$BsmtQual)] <- 0
+mice_train_full$BsmtCond[is.na(mice_train_full$BsmtCond)] <- 0
+mice_train_full$BsmtCond[is.na(mice_train_full$BsmtExposure)] <- 0
+mice_train_full$BsmtFinType1[is.na(mice_train_full$BsmtFinType1)] <- 0
+mice_train_full$BsmtFinType2[is.na(mice_train_full$BsmtFinType2)] <- 0
+mice_train_full$BsmtExposure[is.na(mice_train_full$BsmtExposure)] <- 0
+mice_train_full$Alley[is.na(mice_train_full$Alley)] <- 0
+mice_train_full$FireplaceQu[is.na(mice_train_full$FireplaceQu)] <- 0
+mice_train_full$GarageType[is.na(mice_train_full$GarageType)] <- 0
+mice_train_full$GarageFinish[is.na(mice_train_full$GarageFinish)] <- 0
+mice_train_full$GarageQual[is.na(mice_train_full$GarageQual)] <- 0
+mice_train_full$GarageCond[is.na(mice_train_full$GarageCond)] <- 0
+mice_train_full$PoolQC[is.na(mice_train_full$PoolQC)] <- 0
+mice_train_full$Fence[is.na(mice_train_full$Fence)] <- 0
+mice_train_full$MiscFeature[is.na(mice_train_full$MiscFeature)] <- 0
+```
+
+Now that all the necessary data is imputed we can convert these characters to factors, since we need them to be factors to run models.
+
+```{r}
+mice_train_full$MSSubClass <- as.character(mice_train_full$MSSubClass)
+mice_train_full$Id <- as.character(mice_train_full$Id)
+mice_train_full$OverallQual <- as.character(mice_train_full$OverallQual)
+mice_train_full$OverallCond <- as.character(mice_train_full$OverallCond)
+mice_train_full$YearBuilt <- as.character(mice_train_full$YearBuilt)
+mice_train_full$YearRemodAdd <- as.character(mice_train_full$YearRemodAdd)
+mice_train_full$BsmtFullBath <- as.character(mice_train_full$BsmtFullBath)
+mice_train_full$BsmtHalfBath <- as.character(mice_train_full$BsmtHalfBath)
+mice_train_full$FullBath <- as.character(mice_train_full$FullBath)
+mice_train_full$HalfBath <- as.character(mice_train_full$HalfBath)
+mice_train_full$BedroomAbvGr <- as.character(mice_train_full$BedroomAbvGr)
+mice_train_full$KitchenAbvGr <- as.character(mice_train_full$KitchenAbvGr)
+mice_train_full$TotRmsAbvGrd <- as.character(mice_train_full$TotRmsAbvGrd)
+mice_train_full$Fireplaces <- as.character(mice_train_full$Fireplaces)
+mice_train_full$GarageYrBlt <- as.character(mice_train_full$GarageYrBlt)
+mice_train_full$GarageCars <- as.character(mice_train_full$GarageCars)
+mice_train_full$MoSold <- as.character(mice_train_full$MoSold)
+mice_train_full$YrSold <- as.character(mice_train_full$YrSold)
+mice_train_full[sapply(mice_train_full, is.character)] <- lapply(mice_train_full[sapply(mice_train_full, is.character)], as.factor)
+```
+
+The training dataset now looks good, let's turn our attention to the testing dataset now. How much is missing?
+
+```{r}
+apply(train,2,pMiss)
+```
+
+Similar to the training dataset. We begin with the same MICE operation.
+
+```{r}
+mice_test <- mice(test, m=5,maxit=50,meth='pmm',seed=500)
+mice_test_full <- complete(mice_test,1)
+```
+
+Let's check for the NA's now.
+
+```{r}
+na_count_test_test <-sapply(mice_test_full, function(y) sum(length(which(is.na(y)))))
+na_count_test_test <- data.frame(na_count_test_test)
+na_count_test_test
+```
+
+This time we have to deal with **MSZoning**, **Utilities**, **Exterior1st**, **Exterior2nd**, **KitchenQual**, **Functional**, and **SaleType**. Starting with MSZoning, let's figure out the mode.
+
+```{r}
+table(mice_test_full$MSZoning, useNA = "ifany")
+```
+
+Mode imputation
+
+```{r}
+mice_test_full$MSZoning[is.na(mice_test_full$MSZoning)] <- "RL"
+```
+
+For Utilities
+
+```{r}
+table(mice_test_full$Utilities, useNA = "ifany")
+```
+
+Mode imputation
+
+```{r}
+mice_test_full$Utilities[is.na(mice_test_full$Utilities)] <- "AllPub"
+```
+
+For Exterior1st, and I'm going to assume Exterior2nd follows the same pattern here. We will want to check for multicollinearity on this later for sure.
+
+```{r}
+table(mice_test_full$Exterior1st, useNA = "ifany")
+table(mice_test_full$Exterior2nd, useNA = "ifany")
+```
+
+Slightly different, but we are still going to impute the mode which is the same for both.
+
+```{r}
+mice_test_full$Exterior1st[is.na(mice_test_full$Exterior1st)] <- "VinylSd"
+mice_test_full$Exterior2nd[is.na(mice_test_full$Exterior2nd)] <- "VinylSd"
+```
+
+For KitchenQual
+
+```{r}
+table(mice_test_full$KitchenQual, useNA = "ifany")
+```
+```{r}
+mice_test_full$KitchenQual[is.na(mice_test_full$KitchenQual)] <- "TA"
+```
+
+For Functional
+
+```{r}
+table(mice_test_full$Functional, useNA = "ifany")
+```
+```{r}
+mice_test_full$Functional[is.na(mice_test_full$Functional)] <- "Typ"
+```
+
+And finally, SaleType
+
+```{r}
+table(mice_test_full$SaleType, useNA = "ifany")
+```
+```{r}
+mice_test_full$Functional[is.na(mice_test_full$Functional)] <- "WD"
+```
+
+Now let's swap the rest of the NA's that are valid with 0's and then convert them to factors.
+
+```{r}
+mice_test_full[is.na(mice_test_full)] <- 0
+mice_test_full[sapply(mice_test_full, is.character)] <- lapply(mice_test_full[sapply(mice_test_full, is.character)], as.factor)
+mice_test_full$GarageCars <- as.factor(mice_test_full$GarageCars)
+mice_test_full$Fireplaces <- as.factor(mice_test_full$Fireplaces)
+mice_test_full$TotRmsAbvGrd <- as.factor(mice_test_full$TotRmsAbvGrd)
+mice_test_full$MSSubClass <- as.factor(mice_test_full$MSSubClass)
+mice_test_full$OverallQual <- as.factor(mice_test_full$OverallQual)
+mice_test_full$OverallCond <- as.factor(mice_test_full$OverallCond)
+mice_test_full$FullBath <- as.factor(mice_test_full$FullBath)
+mice_test_full$YearBuilt <- as.factor(mice_test_full$YearBuilt)
+```
+
+We have all the data prepared, now we can start comparing it and one thing that definitely stuck out was the possibility of multicollinearity. GarageCars and GarageArea mentally stood out as well as GarageYrBlt and YearBuilt. Since we are working with both categorical and continuous data we are going to need different methods to test their correlation. With categorical and categorical we have to use chi-square test of independence. With continuous and continuous, we use a correlation coefficient. If categorical and continuous, we can use an anova chart. Id is going to be a useless column and can only get in our way, so lets remove it before anything else.
+```{r}
+mice_train_full <- subset(mice_train_full, select = -c(Id))
+mice_test_full <- subset(mice_test_full, select = -c(Id))
+```
+
+```{r}
+mixed_assoc = function(df, cor_method="spearman", adjust_cramersv_bias=TRUE){
+  df_comb = expand.grid(names(df), names(df),  stringsAsFactors = F) %>% set_names("X1", "X2")
+  
+  is_nominal = function(x) class(x) %in% c("factor", "character")
+  is_numeric <- function(x) { is.integer(x) || is_double(x)}
+  
+  f = function(xName,yName) {
+    x =  pull(df, xName)
+    y =  pull(df, yName)
+    
+    result = if(is_nominal(x) && is_nominal(y)){
+      cv = cramerV(as.character(x), as.character(y), bias.correct = adjust_cramersv_bias)
+      data.frame(xName, yName, assoc=cv, type="cramersV")
+      
+    }else if(is_numeric(x) && is_numeric(y)){
+      correlation = cor(x, y, method=cor_method, use="complete.obs")
+      data.frame(xName, yName, assoc=correlation, type="correlation")
+      
+    }else if(is_numeric(x) && is_nominal(y)){
+      r_squared = summary(lm(x ~ y))$r.squared
+      data.frame(xName, yName, assoc=sqrt(r_squared), type="anova")
+      
+    }else if(is_nominal(x) && is_numeric(y)){
+      r_squared = summary(lm(y ~x))$r.squared
+      data.frame(xName, yName, assoc=sqrt(r_squared), type="anova")
+      
+    }else {
+      warning(paste("unmatched column type combination: ", class(x), class(y)))
+    }
+    
+    result %>% mutate(complete_obs_pairs=sum(!is.na(x) & !is.na(y)), complete_obs_ratio=complete_obs_pairs/length(x)) %>% rename(x=xName, y=yName)
+  }
+  
+  map2_df(df_comb$X1, df_comb$X2, f)
+}
+```
+
+Now let's pass our training set through the function and set it so we can call it immediately. 
+
+```{r}
+mice_train_assoc <- mixed_assoc(mice_train_full)
+mice_train_assoc
+```
+
+```{r}
+mice_train_assoc %>%
+  select(x, y, assoc) %>%
+  spread(y, assoc) %>%
+  column_to_rownames("x") %>%
+  as.matrix %>%
+  as_cordf %>%
+  network_plot()
+```
+Clearly, there is a lot of multicollinearity going on. 
+Let's check the table to see what we can remove.
+
+```{r}
+checkAssoc <- mice_train_assoc[mice_train_assoc$assoc > .7, ]
+checkAssoc
+```
+
+Now we can start dropping the columns that have a high association. This is because the information that these columns carry are already contained in the other column they associate highly with. If we keep it, we may not be able to invert the matrix of the regressors. 
+
+```{r}
+mice_train_full <- subset(mice_train_full, select = -c(MiscFeature, PoolQC, BsmtFinType2, BldgType, GrLivArea, HouseStyle, TotalBsmtSF, GarageCars,Exterior2nd, X2ndFlrSF, GarageQual, BsmtFinType1, YearBuilt, BsmtFullBath, GarageFinish, YearRemodAdd))
+mice_test_full <- subset(mice_test_full, select = -c(MiscFeature, PoolQC, BsmtFinType2, BldgType, GrLivArea, HouseStyle, TotalBsmtSF, GarageCars,Exterior2nd, X2ndFlrSF, GarageQual, BsmtFinType1, YearBuilt, BsmtFullBath, GarageFinish, YearRemodAdd))
+```
+
+Let's check the associations again to make sure we didn't miss anything.
+
+```{r}
+mice_train_assoc <- mixed_assoc(mice_train_full)
+mice_train_assoc %>%
+  select(x, y, assoc) %>%
+  spread(y, assoc) %>%
+  column_to_rownames("x") %>%
+  as.matrix %>%
+  as_cordf %>%
+  network_plot()
+```
+```{r}
+checkAssoc <- mice_train_assoc[mice_train_assoc$assoc > .7, ]
+checkAssoc
+```
+
+We have just one more high association coefficient remaining. 
+
+```{r}
+mice_train_full <- subset(mice_train_full, select = -c(GarageYrBlt))
+mice_test_full <- subset(mice_test_full, select = -c(GarageYrBlt))
+```
+
+We cannot predict where a variable will go if we haven't seen it before so we have to coalesce them.  
+
+Run a function to display the different factors.
+```{r}
+for(attr in colnames(mice_train_full))
+{
+  if (is.factor(mice_train_full[[attr]]))
+  {
+    new.levels <- setdiff(levels(mice_train_full[[attr]]), levels(mice_test_full[[attr]]))
+    if ( length(new.levels) == 0 )
+    { print(paste(attr, '- no new levels')) }
+    else
+    {
+      print(c(paste(attr, length(new.levels), 'of new levels, e.g.'), head(new.levels, 2)))
+    }
+  }
+}  
+```
+There are many different levels in the testing set that are not present in the training set. This is an issue because we are trying to predict using a variable level that is not accounted for. We cannot predict, using our method of linear regression, a value for SalePrice if we are given a level that our model has not seen before. Therefore, we need to coalesce these levels, or remove them. We will go through right now using partial F-tests to see if some of these are significantly associated with SalePrice. 
+
+```{r}
+y1 <- lm(SalePrice~., data = mice_train_full)
+summary(y1)
+y2 <- lm(SalePrice~.-Utilities, data = mice_train_full)
+anova(y2,y1)
+```
+We will be doing this for all the variables that have differing levels. If some levels are significantly associated with SalePrice and there is only 1 observation that is different, we shall impute it with the closest possible level. For instance in the Functional category, Sev is most closely related to Maj2 by intuition and therefore we shall use that. This is quite rudimentary and I'm certain there are better ways of dealing with this, but we must proceed. We shall thus correct all the differences in levels as best as possible right now since we want to try and limit the amount that we are forced to get rid of even if they are generally significally associated. 
+
+```{r}
+mice_train_full <- subset(mice_train_full, select = -c(HalfBath , BsmtHalfBath))
+mice_test_full <- subset(mice_test_full, select = -c(HalfBath , BsmtHalfBath))
+```
+```{r}
+levels(mice_test_full$Fireplaces)[match("4",levels(mice_test_full$Fireplaces))] <- "3"
+levels(mice_test_full$MSSubClass)[match("150",levels(mice_test_full$MSSubClass))] <- "120"
+levels(mice_test_full$FullBath)[match("4",levels(mice_test_full$FullBath))] <- "3"
+levels(mice_test_full$Functional)[match("Sev",levels(mice_test_full$Functional))] <- "Maj2"
+levels(mice_test_full$MasVnrType)[match("None",levels(mice_test_full$MasVnrType))] <- "0"
+mice_train_full <- subset(mice_train_full, select = -c(Condition2, RoofMatl, Exterior1st, Heating, Electrical, BedroomAbvGr, KitchenAbvGr, KitchenQual, SaleType))
+mice_test_full <- subset(mice_test_full, select = -c(Condition2, RoofMatl, Exterior1st, Heating, Electrical, BedroomAbvGr, KitchenAbvGr, KitchenQual, SaleType))
+mice_train_full <- subset(mice_train_full, select = -c(TotRmsAbvGrd))
+mice_test_full <- subset(mice_test_full, select = -c(TotRmsAbvGrd))
+mice_train_full <- subset(mice_train_full, select = -c(Utilities))
+mice_test_full <- subset(mice_test_full, select = -c(Utilities))
+mice_train_full <- subset(mice_train_full, select = -c(Functional, MoSold, YrSold, MasVnrType))
+mice_test_full <- subset(mice_test_full, select = -c(Functional, MoSold, YrSold, MasVnrType))
+```
+
+```{r}
+train.rf <- randomForest(SalePrice ~ ., data=mice_train_full, importance=TRUE, proximity=TRUE)
+print(train.rf)
+```
+
+```{r}
+n = length(mice_train_full$SalePrice)
+PRESS = rep(0,100)
+for (i in 1:500)
+{
+  
+  fit = train.rf
+  test_data_without_y = mice_test_full
+  PRESS[i] = sum((predict(train.rf,test_data_without_y) - sample_submission$SalePrice)^2)
+  
+}
+test_data_without_y$prediction <- predict(train.rf, mice_test_full)
+print(test_data_without_y)
+PRESS_Model <- sum((test_data_without_y$prediction - sample_submission$SalePrice)^2)
+RMSE_Model <- sqrt(mean((test_data_without_y$prediction - sample_submission$SalePrice)^2))
+PRESS_Model
+RMSE_Model
+```
