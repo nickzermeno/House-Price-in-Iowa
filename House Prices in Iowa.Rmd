@@ -21,7 +21,7 @@ Next, we can read the data we will be using.
 ```{r}
 train <- read.csv('train.csv', header=TRUE)
 test <- read.csv('test.csv', header=TRUE)
-sample_submission <- read.csv("sample_submission.csv", header = TRUE)
+
 ```
 
 So we have our data now, what is the first thing we should do? We need it inspect it and get a general idea of what's going on
@@ -282,7 +282,7 @@ Clearly, there is a lot of multicollinearity going on.
 Let's check the table to see what we can remove.
 
 ```{r}
-checkAssoc <- mice_train_assoc[mice_train_assoc$assoc > .7, ]
+checkAssoc <- mice_train_assoc[mice_train_assoc$assoc > .65 & mice_train_assoc$assoc < .99, ]
 checkAssoc
 ```
 
@@ -364,27 +364,115 @@ mice_test_full <- subset(mice_test_full, select = -c(Utilities))
 mice_train_full <- subset(mice_train_full, select = -c(Functional, MoSold, YrSold, MasVnrType))
 mice_test_full <- subset(mice_test_full, select = -c(Functional, MoSold, YrSold, MasVnrType))
 ```
+```{r}
+fullmodel = lm(SalePrice~., mice_train_full)
+mice_train_full <-subset(mice_train_full, select = -c(FireplaceQu, GarageCond,BsmtExposure))
+ld.vars <- attributes(alias(fullmodel)$Complete)$dimnames[[1]]
 
+```
+Found after looking at residual plots and cross examining on the data
+
+```{r}
+mice_train_full <- mice_train_full[-c(1299), ]
+
+```
 ```{r}
 train.rf <- randomForest(SalePrice ~ ., data=mice_train_full, importance=TRUE, proximity=TRUE)
 print(train.rf)
 ```
+```{r}
+nullmodel = lm(SalePrice~1, mice_train_full)
+fullmodel = lm(SalePrice~., mice_train_full)
+scope = list(lower=formula(nullmodel),upper=formula(fullmodel))
+
+
+fit1 <- nullmodel
+forward_model = SignifReg(fit1, scope = scope, alpha = 0.05, direction = "forward",adjust.method = "fdr", trace = TRUE)
+summary(forward_model)
+ld.vars <- attributes(alias(fullmodel)$Complete)$dimnames[[1]]
+
+
+```
+
+```{r}
+w <- abs(rstudent(forward_model)) < 3 & abs(cooks.distance(forward_model)) < 4/nrow(forward_model$model)
+forward_model_weights <- update(forward_model, weights=as.numeric(w))
+
+```
+
+```{r}
+fit2 <- fullmodel
+backwards_model <- SignifReg(fit2, scope = scope, direction = "backward", trace = TRUE)
+summary(backwards_model)
+```
+```{r}
+fit3 <- lm(SalePrice ~ Neighborhood + OverallQual + MSSubClass, data = mice_train_full)
+select.fit = SignifReg(fit3,scope=scope, alpha = 0.5,direction = "both",
+  criterion = "AIC",adjust.method = "fdr",trace=TRUE)
+```
+```{r}
+
+```
+
+```{r}
+bestModel <- lm(formula = SalePrice ~ OverallQual + X1stFlrSF + MSSubClass + 
+    Neighborhood + BsmtFinSF1 + FullBath + SaleCondition + OverallCond + 
+    LotArea + BsmtQual + GarageArea + GarageType + PoolArea + 
+    ScreenPorch + MasVnrArea + HeatingQC + LandSlope + BsmtFinSF2 + 
+    Fireplaces + BsmtUnfSF + MSZoning + Foundation + X3SsnPorch + 
+    Condition1 + LotConfig, data = mice_train_full)
+plot(bestModel)
+summary(bestModel)
+
+```
+
 
 ```{r}
 n = length(mice_train_full$SalePrice)
-PRESS = rep(0,100)
+
+PRESS1 = rep(0,100)
+PRESS2 = rep(0,100)
+PRESS3 = rep(0,100)
+
 for (i in 1:500)
 {
-  
-  fit = train.rf
-  test_data_without_y = mice_test_full
-  PRESS[i] = sum((predict(train.rf,test_data_without_y) - sample_submission$SalePrice)^2)
-  
+
+## 70\% of data to training dataset
+indices = sample(1:n, 0.70*n)
+train_data = mice_train_full[indices,]
+
+## 30\% of data to testing dataset
+test_data = mice_train_full[setdiff(1:n, indices),]
+
+
+## build model with train data
+fit = train.rf
+
+# renmove mpg from test_data
+test_data_without_y = subset(test_data, select = - c(SalePrice))
+
+PRESS1[i] = sum((predict(fit,test_data_without_y ) - test_data$SalePrice)^2)
+PRESS2[i] = sum((predict(bestModel,test_data_without_y ) - test_data$SalePrice)^2)
+PRESS3[i] = sum((predict(backwards_model,test_data_without_y ) - test_data$SalePrice)^2)
+
+
+
 }
-test_data_without_y$prediction <- predict(train.rf, mice_test_full)
-print(test_data_without_y)
-PRESS_Model <- sum((test_data_without_y$prediction - sample_submission$SalePrice)^2)
-RMSE_Model <- sqrt(mean((test_data_without_y$prediction - sample_submission$SalePrice)^2))
-PRESS_Model
-RMSE_Model
+
+
+mean(PRESS1) 
+mean(PRESS2) 
+mean(PRESS3) 
+
+
 ```
+
+
+```{r}
+SalePrice <- (predict(forward_model, mice_test_full))
+predTable <- data.frame(SalePrice)
+predTable$Id <- 1461:2919
+write.csv(predTable,"C:/Users/Nicky/Documents/Kaggle/Kaggle-Competitions/Housing Prices in Iowa/predTable11.csv", row.names = FALSE)
+
+```
+
