@@ -25,7 +25,7 @@ install.packages(c("caret", "tidyverse", "ggplot2"))
 
 The dataset used in this project is the Iowa House Price dataset, which contains information about 2,930 houses sold in Ames, Iowa between 2006 and 2010. The dataset consists of 79 features and a target variable, SalePrice, which is the price at which each house was sold.
 
-The dataset can be found in the `data` directory.
+The dataset can be found in the `Datasets` directory.
 
 ## Exploratory Data Analysis
 
