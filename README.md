@@ -1,6 +1,6 @@
 # House Price in Iowa
 
-This is a machine learning project that aims to predict house prices in Iowa based on various features of the houses. The project is built using R and various machine learning libraries, such as caret, tidyverse, and ggplot2.
+This is a machine learning project that aims to predict house prices in Iowa based on various features of the houses. The project is built using R and various libraries, such as caret, tidyverse, and ggplot2.
 
 ## Getting Started
 
