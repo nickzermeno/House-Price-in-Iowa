@@ -45,10 +45,6 @@ Various statistical methods were used to predict house prices in Iowa. The metho
 
 The results of the machine learning models are presented in the `HousePriceInIowaReport.pdf` report.
 
-## Usage
-
-To use this project, you can run the `house_price_prediction.R` script, which will load the saved machine learning model and predict the prices of houses using the input data.
-
 ## Authors
 
 - Nick Zermeno - [GitHub](https://github.com/nickzermeno)
